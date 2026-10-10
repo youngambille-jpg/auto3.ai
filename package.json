@@ -1,0 +1,49 @@
+{
+  "name": "agentmaxxing",
+  "version": "0.1.0",
+  "description": "Maxx your AI coding agents. A zero-dependency CLI that scaffolds AGENTS.md, installs reusable agent skills, and audits agent readiness in any repository.",
+  "keywords": [
+    "agent",
+    "agents",
+    "agentmaxxing",
+    "maxxing",
+    "ai",
+    "coding-agent",
+    "skills",
+    "agents-md",
+    "cli",
+    "scaffold"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "agentmaxxing": "dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "pretest": "npm run build",
+    "test": "node --test test/*.test.js",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

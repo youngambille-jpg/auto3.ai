@@ -1,0 +1,13 @@
+{
+  "$schema": "https://agentmaxxing.dev/schema/config.json",
+  "version": 1,
+  "skills": {
+    "dir": ".agents/skills",
+    "enabled": [
+      "commit-conventions"
+    ]
+  },
+  "audit": {
+    "failBelow": 60
+  }
+}
