@@ -19,10 +19,3 @@ export function rawToDecimal(raw: string | bigint, decimals: number): string {
   const frac = digits.slice(digits.length - decimals).replace(/0+$/, "");
   return `${neg ? "-" : ""}${whole}${frac ? "." + frac : ""}`;
 }
-
-/** Split a total into `n` roughly equal parts, in exact units. */
-export function splitEvenly(total: number, n: number): number[] {
-  if (n <= 0) return [];
-  const each = total / n;
-  return Array.from({ length: n }, () => each);
-}

@@ -93,5 +93,5 @@ npm run build
 ## Custody
 
 Execution signs from the organization's KeeperHub-managed wallet, not a scoped
-session key. Test on Arbitrum Sepolia and small sizes first. Targeting Arbitrum
-One moves real funds.
+session key. Execution is Arbitrum One only; start with small sizes. Targeting
+Arbitrum One moves real funds.

@@ -24,10 +24,14 @@ function firstMatch(re: RegExp, text: string): RegExpMatchArray | undefined {
   return re.exec(text) ?? undefined;
 }
 
-/** Pull an explicit chain out of the prompt, else use the configured default. */
+/**
+ * Pull an explicit chain out of the prompt, else use the configured default.
+ * Execution is Arbitrum One only (Uniswap V3 swaps are not deployed on
+ * Sepolia), so a Sepolia mention is not honored here; it is rejected by
+ * `validateStrategy` with an explicit message.
+ */
 export function detectChainId(prompt: string): string {
   const t = prompt.toLowerCase();
-  if (/\barbitrum\s+sepolia\b/.test(t)) return "421614";
   if (/\barb(itrum)?\s*(one|mainnet)?\b/.test(t)) return "42161";
   return DEFAULT_CHAIN_ID;
 }
@@ -338,8 +342,12 @@ export function validateStrategy(s: Partial<Strategy> | undefined): StrategyVali
   if (!s) return { ok: false, errors: ["No strategy produced."], warnings };
 
   const chainId = (s as { chainId?: string }).chainId;
-  if (!chainId || !["42161", "421614"].includes(chainId)) {
-    errors.push("Chain must be Arbitrum One (42161) or Arbitrum Sepolia (421614).");
+  if (chainId === "421614") {
+    errors.push(
+      "Arbitrum Sepolia is not executable here: Uniswap V3 swaps are only wired up on Arbitrum One (42161).",
+    );
+  } else if (chainId !== "42161") {
+    errors.push("Chain must be Arbitrum One (42161), the only chain with Uniswap V3 and Chainlink feeds wired up.");
   }
   if (chainId === "42161") {
     warnings.push("Targeting Arbitrum One mainnet. This moves real funds.");

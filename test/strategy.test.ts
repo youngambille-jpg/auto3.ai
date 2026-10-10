@@ -6,9 +6,18 @@ import { planFromText, validateStrategy, detectChainId } from "../src/strategy/p
 import { compileStrategy } from "../src/strategy/compile.ts";
 import { decimalToRaw, rawToDecimal } from "../src/strategy/units.ts";
 
-test("detectChainId defaults to configured chain and honors Sepolia", () => {
+test("detectChainId defaults to Arbitrum One and does not honor Sepolia", () => {
   assert.equal(detectChainId("do something on arbitrum"), "42161");
-  assert.equal(detectChainId("twap on arbitrum sepolia"), "421614");
+  // Sepolia is not executable here, so it is not selected; validate rejects it.
+  assert.equal(detectChainId("twap on arbitrum sepolia"), "42161");
+});
+
+test("validateStrategy rejects Arbitrum Sepolia as non-executable", () => {
+  const { strategy } = planFromText("TWAP buy 1 ETH with USDC over 2 hours");
+  const onSepolia = { ...strategy!, chainId: "421614" };
+  const v = validateStrategy(onSepolia);
+  assert.equal(v.ok, false);
+  assert.match(v.errors.join(" "), /Sepolia is not executable/i);
 });
 
 test("units round-trip exactly", () => {

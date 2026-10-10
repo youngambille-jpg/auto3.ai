@@ -88,7 +88,6 @@ export const keeperHub = {
   chains: () => call<Array<{ chainId: number; name: string; isTestnet: boolean; isEnabled: boolean }>>("GET", "/api/chains"),
   wallet: () =>
     call<Array<{ id: string; type: string; address?: string }>>("GET", "/api/integrations"),
-  actionSchemas: () => call<{ actions: Record<string, unknown> }>("GET", "/api/action-schemas"),
 
   createWorkflow: (wf: { name: string; description?: string; nodes: unknown[]; edges: unknown[] }) =>
     call<KeeperHubWorkflow>("POST", "/api/workflows/create", wf),
@@ -116,14 +115,3 @@ export const keeperHub = {
       40_000,
     ),
 };
-
-/** Live USD price from a Chainlink feed via a direct contract read. */
-export async function readChainlink(answerFn: (args: { contractAddress: string; chainId: string }) => Promise<{ result?: string }>, address: string): Promise<number | undefined> {
-  try {
-    const out = await answerFn({ contractAddress: address, chainId: "42161" });
-    if (out?.result === undefined) return undefined;
-    return Number(out.result) / 1e8;
-  } catch {
-    return undefined;
-  }
-}

@@ -215,7 +215,7 @@ export function App() {
 
       <footer className="pagefoot muted small">
         Custody note: execution signs from the KeeperHub-managed wallet for this organization, not a
-        scoped session key. Test with Arbitrum Sepolia and small sizes first.
+        scoped session key. Execution is Arbitrum One only; start with small sizes.
       </footer>
     </main>
   );

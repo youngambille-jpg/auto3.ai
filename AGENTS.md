@@ -46,8 +46,9 @@ npm run build
   forces a spend.
 - **Execution is Arbitrum One only** (`EXECUTION_CHAIN = "42161"`). Uniswap V3
   and the Chainlink feeds are not wired up elsewhere, so `compileStrategy`
-  throws rather than emitting a broken workflow. Sepolia (`421614`) top-ups
-  will fail at compile time by design.
+  throws rather than emitting a broken workflow, and `validateStrategy` rejects
+  Sepolia (`421614`) with an explicit message instead of producing a preview
+  that can never execute.
 - **`/api/execute` requires `{confirmed: true}`.** Never create a workflow
   without it.
 - **The planner proposes, it never executes.** Any LLM output runs through

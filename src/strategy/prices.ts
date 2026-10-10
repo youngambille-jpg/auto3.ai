@@ -52,8 +52,3 @@ export function isStable(symbol: string): boolean {
 export function rawToPrice(raw: string, decimals = 8): number {
   return Number(raw) / 10 ** decimals;
 }
-
-/** Raw int256 threshold for a human USD price. */
-export function priceToRaw(price: number, decimals = 8): string {
-  return BigInt(Math.round(price * 10 ** decimals)).toString();
-}
