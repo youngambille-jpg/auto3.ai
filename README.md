@@ -1,118 +1,97 @@
-# agentmaxxing
+# Strategy Studio
 
-Maxx your AI coding agents.
+Describe an on-chain trading strategy in plain English. Preview it as a card.
+Approve it. It runs on Arbitrum via [KeeperHub](https://app.keeperhub.com).
 
-`agentmaxxing` is a zero-dependency CLI that gets any repository ready for
-autonomous coding agents. It scaffolds the durable memory agents read
-(`AGENTS.md`), installs reusable agent skills, and audits how agent-ready a repo
-is.
+No drag-and-drop, no node editor. You write a sentence and the studio turns it
+into a typed strategy, a KeeperHub workflow, and a preview card with the live
+oracle price, a Uniswap quote, a backtest, and the risks that matter.
 
-Works with any stack and any agent that reads `AGENTS.md` and skills
-(OpenHands, Claude Code, Codex, Cursor, Copilot, and others).
+## How it works
 
-## Install
-
-```bash
-# run without installing
-npx agentmaxxing init
-
-# or install globally
-npm install -g agentmaxxing
+```
+prompt ──▶ planner ──▶ Strategy ──▶ compile ──▶ KeeperHub workflow
+           (regex or    (typed      (nodes +    (schedule → approve → swap)
+            LLM)         spec)       edges)
+                                          │
+                                          ▼
+                          preview card (price · quote · backtest · risks)
+                                          │
+                                    Approve & Execute
 ```
 
-Requires Node.js 18 or newer.
+- **Planner** (`src/strategy/planner.ts`, `llmPlanner.ts`) parses the sentence
+  into a `Strategy`. A deterministic regex planner always runs; an LLM planner
+  (Gemini or any OpenAI-compatible endpoint) is tried first when configured. Any
+  LLM proposal is validated against the fixed spec, and anything off falls back
+  to the regex planner. The agent proposes, it never executes.
+- **Compiler** (`src/strategy/compile.ts`) turns the spec into KeeperHub nodes
+  and edges. Swaps, approvals and Chainlink reads only exist on Arbitrum One, so
+  the compiler refuses other chains instead of emitting a workflow that fails.
+- **Server** (`src/server/index.ts`) keeps the API key server-side and exposes a
+  small API. **UI** (`src/ui/`) renders the composer, the preview card and the
+  execution status.
 
-## Commands
+## Strategy kinds
 
-### `agentmaxxing init`
+| Kind | Example sentence | Compiles to |
+|---|---|---|
+| `twap` | `TWAP buy 5 ETH with USDC over 6 hours` | Schedule → approve → swap (per slice) |
+| `dca` | `DCA 100 USDC into ETH every day for 30 days` | Schedule → approve → swap |
+| `grid` | `Grid ETH between 2400 and 2800 with 10 levels, 2 ETH total` | Schedule → read price → band conditions → approve → swap |
+| `limit` | `Limit buy 1 ETH at 2400 with USDC` | Schedule → read price → condition → approve → swap |
+| `stop` | `Stop loss: sell 1 ETH if price drops to 2200` | Schedule → read price → condition → approve → swap |
 
-Scaffolds the basics in the current directory:
+### Sizing is base-denominated
 
-- `AGENTS.md` - persistent memory for coding agents (setup, layout, conventions)
-- `agentmaxxing.config.json` - configuration
-- `.agents/skills/commit-conventions/SKILL.md` - a starter skill
+`sizeUnit` decides which leg the size counts. `buy 2 ETH` = acquire 2 ETH, and
+compiles to a `uniswap/swap-exact-output` order with an oracle-derived
+`amountInMaximum`, so "2 ETH" really means 2 ETH and a stale pool cannot drain
+the wallet. `spend 100 USDC` = spend 100 USDC, an exact-input swap.
 
-Existing files are kept unless you pass `--force`.
-
-### `agentmaxxing skills`
-
-```bash
-agentmaxxing skills              # list bundled skills
-agentmaxxing skills add <name>   # install a skill into .agents/skills/<name>
-```
-
-Bundled skills:
-
-| Skill | Purpose |
-| :--- | :--- |
-| `commit-conventions` | Conventional Commits and atomic commits |
-| `agent-readiness` | Keep a repo easy for agents to work in |
-
-### `agentmaxxing audit`
-
-Scores how agent-ready the repository is, from `F` to `A`:
-
-```text
-$ agentmaxxing audit
-
-agentmaxxing audit: /path/to/repo
-
-  [x] AGENTS.md present (agent memory)
-  [x] README.md present
-  [x] Test suite or test script present
-  [ ] CI configuration present
-      hint: Add a CI workflow so agent changes are checked automatically
-  ...
-
-Score: 7/9 (B)
-```
-
-The audit exits non-zero below the configured `audit.failBelow` percentage, so
-you can run it in CI.
-
-## Options
-
-| Flag | Description |
-| :--- | :--- |
-| `-d, --dir <path>` | Target directory (default: current working directory) |
-| `-f, --force` | Overwrite existing files |
-| `-q, --quiet` | Suppress non-essential output |
-| `-v, --version` | Print the version |
-| `-h, --help` | Print help |
-
-## Programmatic use
-
-```ts
-import { audit, installSkill, renderAgentsMd } from "agentmaxxing";
-
-await installSkill(process.cwd(), "commit-conventions");
-const report = await audit(process.cwd(), process.cwd());
-console.log(report.grade);
-```
-
-## What "agent-ready" means
-
-Agents succeed when they can understand a repo without guessing and verify their
-own work. `agentmaxxing` checks the concrete facts that make that possible:
-
-- durable memory (`AGENTS.md`)
-- a README
-- a test suite or test script
-- CI
-- a lint script
-- a committed lockfile
-- a documented `.env.example`
-- an installed reusable skill
-- the `agentmaxxing` config
-
-## Development
+## Setup
 
 ```bash
 npm install
-npm test        # builds, then runs the test suite
-npm run build   # compile TypeScript to dist/
+cp .env.example .env      # then fill in the values
+npm run dev               # server + Vite dev server
 ```
 
-## License
+`.env` keys:
 
-MIT
+| Key | Required | Notes |
+|---|---|---|
+| `KEEPERHUB_API_KEY` | yes | Server-side only; never reaches the browser |
+| `STRATEGY_CHAIN_ID` | no | Default `42161` (Arbitrum One) |
+| `PORT` | no | Default `8787` |
+| `GEMINI_API_KEY` | no | Enables the LLM planner |
+| `OPENAI_API_KEY` / `LLM_API_KEY` | no | OpenAI-compatible fallback planner |
+
+## API
+
+| Route | Purpose |
+|---|---|
+| `POST /api/plan` | `{prompt}` → strategy + assumptions + planner used |
+| `POST /api/preview` | `{strategy}` → preview card payload |
+| `POST /api/execute` | `{strategy, confirmed: true}` → creates and runs the KeeperHub workflow |
+| `GET /api/health` | config + wallet status |
+| `GET /api/runs/:executionId` | execution status + step logs |
+| `DELETE /api/workflows/:workflowId` | remove a workflow |
+
+`/api/execute` requires `confirmed: true` — nothing is created unless the client
+echoes back that the user approved the preview they were shown.
+
+## Tests
+
+```bash
+npm test          # unit: planner, compiler, backtest (no network)
+npm run test:live # live KeeperHub: auth, workflow create/delete, read-only execute
+npm run typecheck
+npm run build
+```
+
+## Custody
+
+Execution signs from the organization's KeeperHub-managed wallet, not a scoped
+session key. Test on Arbitrum Sepolia and small sizes first. Targeting Arbitrum
+One moves real funds.
