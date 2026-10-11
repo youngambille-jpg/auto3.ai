@@ -40,10 +40,12 @@ npm run build
 ## Invariants — do not break
 
 - **Base-denominated sizing.** `sizeUnit: "buy"` must compile to
-  `uniswap/swap-exact-output` with an oracle-derived `amountInMaximum`; `"sell"`
-  to `swap-exact-input`. `sizeIsBuyDenominated()` in the planner and
-  `legSwapNode()` in the compiler are the pair that enforces this. A dollar sign
-  forces a spend.
+  `uniswap/swap-exact-output` with an `amountInMaximum` that is
+  `min(oracleCap, liveQuote)` (`swapBudget` in `CompilePrices`), and the approve
+  must cover the summed budget across all swaps; `"sell"` compiles to
+  `swap-exact-input`. `sizeIsBuyDenominated()` in the planner and
+  `legSwapNode()`/`approveTotalFor()` in the compiler enforce this. A dollar
+  sign forces a spend.
 - **Execution is Arbitrum One only** (`EXECUTION_CHAIN = "42161"`). Uniswap V3
   and the Chainlink feeds are not wired up elsewhere, so `compileStrategy`
   throws rather than emitting a broken workflow, and `validateStrategy` rejects
@@ -64,3 +66,9 @@ npm run build
 - KeeperHub workflows are created even when not executed; clean up test
   workflows with `DELETE /api/workflows/:id`.
 - Never commit `.env`. It is gitignored; only `.env.example` is tracked.
+- **Push access.** The `GITHUB_TOKEN` in this environment is a read-only
+  GitHub App installation token: `git push` and write API calls return 403
+  ("Resource not accessible by integration") even though the API reports
+  `push: true` and the git username resolves to the owner. Commits must be left
+  local (or the remote URL set with a user-supplied PAT) until a writable token
+  is provided.
