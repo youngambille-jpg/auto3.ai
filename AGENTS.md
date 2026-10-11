@@ -66,9 +66,8 @@ npm run build
 - KeeperHub workflows are created even when not executed; clean up test
   workflows with `DELETE /api/workflows/:id`.
 - Never commit `.env`. It is gitignored; only `.env.example` is tracked.
-- **Push access.** The `GITHUB_TOKEN` in this environment is a read-only
-  GitHub App installation token: `git push` and write API calls return 403
-  ("Resource not accessible by integration") even though the API reports
-  `push: true` and the git username resolves to the owner. Commits must be left
-  local (or the remote URL set with a user-supplied PAT) until a writable token
-  is provided.
+- **Push access.** The environment's `GITHUB_TOKEN` is a read-only GitHub App
+  installation token: pushes and write API calls return 403 ("Resource not
+  accessible by integration"). Pushing works only with a user-supplied PAT;
+  set it on the remote URL for the single push, then reset the remote back to
+  the plain HTTPS URL so the secret is not persisted in `.git/config`.
