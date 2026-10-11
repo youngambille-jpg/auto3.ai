@@ -27,6 +27,12 @@ interface RunStatus {
   output?: unknown;
 }
 
+interface StrategyTemplate {
+  id: string;
+  name: string;
+  description: string;
+}
+
 export function App() {
   const [prompt, setPrompt] = useState("");
   const [strategy, setStrategy] = useState<Strategy | null>(null);
@@ -34,6 +40,8 @@ export function App() {
   const [assumptions, setAssumptions] = useState<string[]>([]);
   const [planner, setPlanner] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<StrategyTemplate[]>([]);
+  const [deployed, setDeployed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [run, setRun] = useState<RunState | null>(null);
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null);
@@ -47,6 +55,8 @@ export function App() {
     setError(null);
     setPreview(null);
     setStrategy(null);
+    setTemplates([]);
+    setDeployed(null);
     setRun(null);
     setRunStatus(null);
     if (!text.trim()) return;
@@ -58,15 +68,35 @@ export function App() {
         body: JSON.stringify({ prompt: text }),
       });
       const data = await res.json();
+      setAssumptions(data.assumptions ?? []);
+      setTemplates(data.templateSuggestions ?? []);
       if (!res.ok || data.error) {
         setError(data.error ?? "Could not plan strategy.");
-        setAssumptions(data.assumptions ?? []);
         return;
       }
       setStrategy(data.strategy);
-      setAssumptions(data.assumptions ?? []);
       setPlanner(data.planner ?? "");
       await loadPreview(data.strategy);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deployStrategyTemplate(t: StrategyTemplate) {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/templates/${t.id}/deploy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: t.name }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Could not deploy template.");
+        return;
+      }
+      setDeployed(data.id);
     } finally {
       setBusy(false);
     }
@@ -161,6 +191,34 @@ export function App() {
       )}
 
       {error && <div className="errors">{error}</div>}
+
+      {!strategy && templates.length > 0 && (
+        <section className="card templates">
+          <header className="card-head">
+            <h2>Not a strategy we compile — try a template</h2>
+          </header>
+          <p className="muted small">
+            This looks like a monitoring or yield task. These are real KeeperHub workflows you can
+            deploy as-is, then tweak.
+          </p>
+          <ul className="template-list">
+            {templates.map((t) => (
+              <li key={t.id}>
+                <div>
+                  <strong>{t.name}</strong>
+                  <p className="muted small">{t.description}</p>
+                </div>
+                <button className="chip" disabled={busy} onClick={() => deployStrategyTemplate(t)}>
+                  Deploy
+                </button>
+              </li>
+            ))}
+          </ul>
+          {deployed && (
+            <p className="ok small">Deployed workflow {deployed}. Find it in your KeeperHub org.</p>
+          )}
+        </section>
+      )}
 
       {strategy && preview && (
         <PreviewCard

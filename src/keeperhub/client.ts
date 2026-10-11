@@ -89,6 +89,18 @@ export const keeperHub = {
   wallet: () =>
     call<Array<{ id: string; type: string; address?: string }>>("GET", "/api/integrations"),
 
+  /** Public template catalog (read-only; no auth scoping to the org). */
+  listPublicTemplates: () =>
+    call<Array<{ id: string; name: string; description?: string | null; nodes?: unknown[]; featured?: boolean }>>(
+      "GET",
+      "/api/workflows/public",
+    ),
+  getPublicTemplate: (id: string) =>
+    call<{ id: string; name: string; description?: string | null; nodes?: unknown[]; edges?: unknown[] }>(
+      "GET",
+      `/api/workflows/${id}`,
+    ),
+
   createWorkflow: (wf: { name: string; description?: string; nodes: unknown[]; edges: unknown[]; enabled?: boolean }) =>
     call<KeeperHubWorkflow>("POST", "/api/workflows/create", wf),
   deleteWorkflow: (id: string) => call<{ success: boolean }>("DELETE", `/api/workflows/${id}?force=true`),

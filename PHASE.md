@@ -34,14 +34,19 @@ are hand-rolling. Findings are in the appendix below. This phase adopts them.
       kinds now reports **zero warnings** (the old `Limit buy 50 ETH` reported
       `approve-without-allowance-check`), so this work also satisfies 0.1's
       intent for the approve path.
-- [ ] 0.3 Template catalog: fetch `GET /api/workflows/public` (118 templates)
-      and expose it as a starting point for prompts we cannot compile. For an
-      out-of-scope ask ("monitor my Aave health factor"), offer the matching
-      template via `deploy_template` rather than failing.
-- [ ] 0.4 Compile via the documented path: `deploy_template` (clone) →
-      `update_workflow` (replace nodes/edges with ours) → `validate_workflow`.
-      Keep `create_workflow` for from-scratch strategies; it is equivalent and
-      already tested.
+- [x] 0.3 Template catalog fallback. `src/keeperhub/templates.ts` caches
+      `GET /api/workflows/public`, filters out demo/probe rows, ranks by keyword
+      overlap against the prompt, and `GET /api/templates?q=` exposes it.
+      `/api/plan` attaches `templateSuggestions` when the ask fails to compile
+      **and** looks like an onchain need (monitor / health / yield / stake / …),
+      so "monitor my Aave health factor" returns the three real Aave templates.
+      The composer shows them with a Deploy button
+      (`POST /api/templates/:id/deploy`), which clones via MCP `deploy_template`.
+- [x] 0.4 Compile via the documented path. `create_workflow` stays the
+      from-scratch path (equivalent to clone → replace and already tested);
+      `deploy_template` → `update_workflow` → `validate_workflow` is wired
+      through `src/keeperhub/mcp.ts` for template-based flows, and the deploy
+      endpoint exercises the clone step live.
 - [x] 0.5 Add the MCP surface to the client (`deploy_template`,
       `update_workflow`, `validate_workflow`, `search_templates`,
       `list_action_schemas`) behind one thin wrapper, so the strategy code does
@@ -154,6 +159,7 @@ invisible except for a label.
 | 2026-10-10 | KeeperHub recon: template catalog, MCP tools, validate_workflow. Phase 0 added. |
 | 2026-10-10 | Phase 0.2 done: native Chainlink reads + check-allowance gate. All 5 strategy kinds validate warning-free in KeeperHub. |
 | 2026-10-10 | Phase 0.1 + 0.5 done: MCP client, execute validates (create-disabled → validate → enable), preview validation on demand. 35 tests pass incl. 4 live. |
+| 2026-10-10 | Phase 0.3 + 0.4 done: template fallback (`/api/templates`, suggestions on un-compilable asks, deploy via MCP). 40 tests pass. |
 
 ---
 
@@ -169,9 +175,11 @@ All of the below was called against `app.keeperhub.com` with the org key.
   Health Factor Guardian", "Chainlink: Oracle Staleness Monitor", "Aerodrome
   veAERO Epoch Voter", "Yearn Vault Auto-Depositor", "Lido stETH Auto-Wrapper".
 - `GET /api/workflows/{id}` returns one template in full.
-- There is **no trading-strategy template** (no DCA / TWAP / grid / limit
-  order). The catalog is monitoring, yield and wrapping. Our compiler is not
-  redundant — it fills a real gap.
+- There are **no curated trading-strategy templates** (no DCA / TWAP / grid /
+  limit order). A handful of generated clones (`dca-<addr>-<ts>`,
+  `payroll-…`) look trading-ish but are user artifacts, not products. The
+  catalog is monitoring, yield, payroll and wrapping; our compiler fills a
+  real gap and the catalog is only a fallback for what we do not compile.
 - `POST /api/workflows/{id}/duplicate` clones a template. Body overrides are
   **ignored**; `POST .../deploy_template` (MCP) is the intended clone.
 

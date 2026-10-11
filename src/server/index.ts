@@ -21,6 +21,7 @@ import { compileStrategy } from "../strategy/compile.js";
 import { buildPreview, liveChainlinkPrice } from "./preview.js";
 import { keeperHub, KeeperHubError } from "../keeperhub/client.js";
 import { keeperHubMcp } from "../keeperhub/mcp.js";
+import { listTemplates, rankTemplates, suggestTemplates, deployTemplate, looksLikeOnchainNeed, type TemplateSummary } from "../keeperhub/templates.js";
 import { isStable } from "../strategy/prices.js";
 import type { Strategy } from "../strategy/spec.js";
 
@@ -65,7 +66,35 @@ app.post("/api/plan", async (req, res) => {
   if (!prompt) return fail(res, 400, "prompt is required");
   if (prompt.length > 2000) return fail(res, 400, "prompt too long (max 2000 chars)");
   const result = await plan(prompt);
-  res.json(result);
+  // If we cannot compile the ask but it looks like a real onchain need, offer
+  // the closest KeeperHub templates as a starting point.
+  let templateSuggestions: TemplateSummary[] = [];
+  if (!result.strategy && looksLikeOnchainNeed(prompt)) {
+    templateSuggestions = await suggestTemplates(prompt);
+  }
+  res.json({ ...result, templateSuggestions });
+});
+
+app.get("/api/templates", async (req, res) => {
+  const query = typeof req.query?.q === "string" ? req.query.q : "";
+  try {
+    const items = await listTemplates();
+    res.json({ templates: query ? rankTemplates(query, items, 10) : items });
+  } catch (e) {
+    fail(res, 502, (e as Error).message);
+  }
+});
+
+app.post("/api/templates/:templateId/deploy", async (req, res) => {
+  try {
+    const name = typeof req.body?.name === "string" ? req.body.name : undefined;
+    const out = await deployTemplate(req.params.templateId, name);
+    if (!out?.id) return fail(res, 502, "KeeperHub did not return a workflow id");
+    res.json(out);
+  } catch (e) {
+    if (e instanceof KeeperHubError) return fail(res, e.status >= 400 && e.status < 600 ? e.status : 502, e.message, { keeperhub: e.body });
+    fail(res, 502, (e as Error).message);
+  }
 });
 
 app.post("/api/preview", async (req, res) => {

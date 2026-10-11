@@ -84,6 +84,12 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .risks li { margin: 4px 0; font-size: 13px; }
 .errors { background: rgba(255,135,135,.1); border: 1px solid rgba(255,135,135,.35); color: #ffc9c9; font-size: 13px; }
 
+.template-list { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 10px; }
+.template-list li { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.template-list p { margin: 4px 0 0; }
+.template-list .chip { flex: none; }
+.ok { color: var(--accent2); }
+
 .assumptions { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin-top: 16px; font-size: 13px; }
 .assumptions ul { margin: 6px 0 0; padding-left: 18px; }
 
