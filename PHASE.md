@@ -117,6 +117,31 @@ quoted `amountIn` (e.g. 2087128569 USDC wei) and beats the oracle estimate.
 
 ---
 
+## Phase 2.5 — UI: "quiet instrument" (design pass)
+
+The first UI read like a generic dark dashboard. This pass gives it a point of
+view, borrowing Perplexity's brand trio (Offblack `#091717`, Paper White
+`#FBFAF4`, True Turquoise `#20808D`) and its editorial display type.
+
+- [x] 2.5.1 New design system in `src/ui/styles.css`: deep teal-tinted surface,
+      one luminous turquoise accent (`#2fd6c6`) over the brand teal
+      (`#20808d`), hairline borders, a single soft glow. Fraunces (display
+      serif) + Instrument Sans (UI) + JetBrains Mono (all figures), loaded in
+      `index.html`.
+- [x] 2.5.2 Restructured shell in `src/ui/App.tsx`: brand mark + wordmark, an
+      editorial hero ("Describe the trade. *We'll build it, show it, run it.*"),
+      and a Perplexity-style composer — one large rounded input with the primary
+      action anchored inside it and a ⌘/Ctrl+Enter hint.
+- [x] 2.5.3 Component pass: `PreviewCard` facts become a hairline grid with
+      mono figures; steps become numbered chips; `PriceChart` sits on the new
+      surface. Reduced-motion is respected.
+
+**Acceptance:** no drag-and-drop; the composer is the only input; every render
+path (compiled strategy, grid + chart, template suggestions) looks intentional.
+Verified live in the browser.
+
+---
+
 ## Phase 3 — Latency: regex-first, LLM-refine
 
 Planning blocked on Gemini for ~45s when it 503s. That is the worst UX problem.
@@ -165,6 +190,7 @@ invisible except for a label.
 | 2026-10-10 | Phase 0.1 + 0.5 done: MCP client, execute validates (create-disabled → validate → enable), preview validation on demand. 35 tests pass incl. 4 live. |
 | 2026-10-10 | Phase 0.3 + 0.4 done: template fallback (`/api/templates`, suggestions on un-compilable asks, deploy via MCP). 40 tests pass. |
 | 2026-10-10 | Phase 2 done: live `quote-exact-output` caps buy-denominated swaps, shared market context for preview/execute, `/api/markets` + pair probe. 42 tests pass. |
+| 2026-10-10 | Phase 2.5 done: Perplexity-inspired "quiet instrument" UI pass (turquoise/offblack system, Fraunces display, composer-first layout). Build + 42 tests green; verified live. |
 
 ---
 

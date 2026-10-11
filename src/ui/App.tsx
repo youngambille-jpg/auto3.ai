@@ -159,8 +159,18 @@ export function App() {
   return (
     <main className="app">
       <header className="topbar">
-        <h1>Strategy Studio</h1>
-        <span className="muted">describe it · preview the card · approve &amp; execute on Arbitrum</span>
+        <div className="brand">
+          <span className="mark" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M3 17.5 9 11l4 4 8-8.5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M21 3v6h-6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+          <span className="word">
+            <strong>Strategy Studio</strong>
+            <small>natural-language trading · Arbitrum</small>
+          </span>
+        </div>
         <div className="health">
           <span className={health?.keeperHubAuthOk ? "dot ok" : "dot bad"} />
           {health?.keeperHubAuthOk ? "KeeperHub connected" : "KeeperHub not connected"}
@@ -168,19 +178,34 @@ export function App() {
         </div>
       </header>
 
+      <section className="hero">
+        <h2>
+          Describe the trade.<br />
+          <em>We&apos;ll build it, show it, run it.</em>
+        </h2>
+        <p>
+          No drag-and-drop. Say what you want in plain language and Strategy Studio compiles the exact
+          onchain workflow — preview the card, then approve and execute on Arbitrum.
+        </p>
+      </section>
+
       <section className="composer">
         <textarea
           value={prompt}
-          placeholder="Tell me what you want to do. e.g. TWAP buy 5 ETH with USDC over 6 hours"
+          placeholder="e.g. TWAP buy 5 ETH with USDC over 6 hours"
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) planStrategy(prompt);
           }}
           rows={2}
+          aria-label="Describe your strategy"
         />
-        <button className="primary" disabled={busy || !prompt.trim()} onClick={() => planStrategy(prompt)}>
-          {busy ? "Planning…" : "Preview"}
-        </button>
+        <span className="hint">⌘/Ctrl + Enter to preview</span>
+        <div className="go">
+          <button className="primary" disabled={busy || !prompt.trim()} onClick={() => planStrategy(prompt)}>
+            {busy ? "Planning…" : "Preview →"}
+          </button>
+        </div>
       </section>
 
       <div className="examples">
