@@ -26,8 +26,10 @@ export interface LlmConfig {
 const OPENROUTER_URL = "https://openrouter.ai/api/v1";
 
 function timeoutMs(): number {
-  const n = Number(process.env.LLM_TIMEOUT_MS ?? "20000");
-  return Number.isFinite(n) && n > 0 ? n : 20_000;
+  // Reasoning models can take 10s+ to emit a full strategy, so the default is
+  // generous; a provider that is merely slow still gets skipped by the chain.
+  const n = Number(process.env.LLM_TIMEOUT_MS ?? "45000");
+  return Number.isFinite(n) && n > 0 ? n : 45_000;
 }
 
 function geminiConfig(): LlmConfig | undefined {

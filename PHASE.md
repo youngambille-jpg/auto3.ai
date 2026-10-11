@@ -220,6 +220,7 @@ failure is visible, not silent.
 | 2026-10-10 | Phase 2 done: live `quote-exact-output` caps buy-denominated swaps, shared market context for preview/execute, `/api/markets` + pair probe. 42 tests pass. |
 | 2026-10-10 | Phase 2.5 done: Perplexity-inspired "quiet instrument" UI pass (turquoise/offblack system, Fraunces display, composer-first layout). Build + 42 tests green; verified live. |
 | 2026-10-11 | Phase 3 done: LLM-only planner with a Gemini → OpenRouter → OpenAI-compatible fallback chain; regex removed from the runtime path (503 on total failure). 48 tests pass. |
+| 2026-10-11 | Phase 3 hardening: `LLM_TIMEOUT_MS` default raised 20s → 45s after live verification showed a reasoning fallback model needs ~14s for a full plan; the old default aborted it. Verified end-to-end in the browser. |
 
 ---
 
