@@ -203,6 +203,20 @@ function swapExactOutputNode(
 export interface CompilePrices {
   sellUsd?: number;
   buyUsd?: number;
+  /**
+   * Real sell-token amount for ONE reference swap, from a Uniswap
+   * `quote-exact-output`. When present it becomes the exact-output cap for a
+   * single swap unit (better than the oracle estimate). Approve totals are
+   * widened so the allowance always covers the summed budgets.
+   */
+  swapBudget?: number;
+}
+
+/** Number of swaps a strategy performs over its life (for budget summing). */
+function swapUnits(s: Strategy): number {
+  if (s.kind === "twap" || s.kind === "dca") return s.slices;
+  if (s.kind === "grid") return s.levels;
+  return 1;
 }
 
 /**
@@ -221,10 +235,21 @@ function legSwapNode(
   prices: CompilePrices,
 ): WorkflowNode {
   if (s.sizeUnit === "buy") {
-    const cap = oracleInputCap(s, buyAmount, prices);
+    const oracleCap = oracleInputCap(s, buyAmount, prices);
+    const cap = prices.swapBudget ? Math.min(oracleCap, prices.swapBudget) : oracleCap;
     return swapExactOutputNode(id, label, s, decimalToRaw(buyAmount, buyDecimals), decimalToRaw(cap, sellDecimals), recipient);
   }
   return swapNode(id, label, s, decimalToRaw(sellAmount, sellDecimals), recipient);
+}
+
+/**
+ * Sell-token allowance to approve for a buy-denominated strategy: the oracle
+ * cap, widened to cover a real budget summed across every swap when we have one.
+ */
+function approveTotalFor(s: Strategy, prices: CompilePrices): number {
+  const oracle = oracleInputCap(s, s.totalSize, prices);
+  if (!prices.swapBudget) return oracle;
+  return Math.max(oracle, prices.swapBudget * swapUnits(s) * 1.05);
 }
 
 /**
@@ -329,7 +354,7 @@ export function compileStrategy(
       recipient,
       prices,
     );
-    const approveTotal = buyDenominated ? oracleInputCap(s, s.totalSize, prices) : s.totalSize;
+    const approveTotal = buyDenominated ? approveTotalFor(s, prices) : s.totalSize;
     const totalRaw = decimalToRaw(approveTotal, sellDecimals);
     const approve = approveNode("approve-1", s, totalRaw);
     const gate = allowanceGate("allow-1", "cond-allow", approve, s, totalRaw, recipient, { source: "trigger-1" });
@@ -366,7 +391,7 @@ export function compileStrategy(
       : (s.kind === "limit" ? ">=" : "<=");
     const condition = conditionNode("cond-1", read.ref, op, rawPrice);
     const buyDenominated = s.sizeUnit === "buy";
-    const approveTotal = buyDenominated ? oracleInputCap(s, s.totalSize, prices) : s.totalSize;
+    const approveTotal = buyDenominated ? approveTotalFor(s, prices) : s.totalSize;
     const totalRaw = decimalToRaw(approveTotal, sellDecimals);
     const swap = legSwapNode(
       "swap-1",
@@ -421,7 +446,7 @@ export function compileStrategy(
     const rawLow = decimalToRaw(s.lowerPrice, 8);
     const perLevel = s.totalSize / s.levels;
     const buyDenominated = s.sizeUnit === "buy";
-    const approveTotal = buyDenominated ? oracleInputCap(s, s.totalSize, prices) : s.totalSize;
+    const approveTotal = buyDenominated ? approveTotalFor(s, prices) : s.totalSize;
     const totalRaw = decimalToRaw(approveTotal, sellDecimals);
 
     const swap = legSwapNode(

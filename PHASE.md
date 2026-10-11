@@ -97,19 +97,23 @@ The card's only value is that it is true. Fix the math before adding anything.
 
 ## Phase 2 — Make the preview real
 
-- [ ] 2.1 Use `uniswap/quote-exact-output` for buy-denominated sizes so the
-      displayed spend and the `amountInMaximum` cap come from a real pool quote
-      (oracle becomes the fallback / sanity ceiling).
-      - `src/server/preview.ts`, `src/strategy/compile.ts`
-- [ ] 2.2 Extract one `resolveExecutionContext(strategy)` helper (wallet + both
-      USD prices + compiled workflow) shared by preview and execute.
-      - `src/server/index.ts`, `src/server/preview.ts`
-- [ ] 2.3 Add `GET /api/markets` sourced from KeeperHub `list_action_schemas`
-      so the composer can validate pairs before planning.
-      - `src/keeperhub/client.ts`, `src/server/index.ts`
+- [x] 2.1 Buy-denominated sizes now quote through `uniswap/quote-exact-output`.
+      The per-swap `amountInMaximum` is `min(oracleCap, liveQuote)`, and the
+      approve is widened to cover the summed budget across all swaps
+      (`swapBudget * units * 1.05`). The oracle stays as the fallback ceiling.
+      - `src/server/context.ts`, `src/strategy/compile.ts`, `src/server/preview.ts`
+- [x] 2.2 One `resolveMarketContext(strategy)` helper (wallet + both USD prices
+      + live swap budget + display budget) shared by preview and execute, so the
+      card the user approves is exactly what runs.
+      - `src/server/context.ts`, `src/server/index.ts`, `src/server/preview.ts`
+- [x] 2.3 `GET /api/markets` (registry tokens + Uniswap actions from
+      `list_action_schemas`) and `GET /api/markets/pair` (a live probe) let the
+      composer reject a pair with no pool before it plans/executes.
+      - `src/server/markets.ts`, `src/server/index.ts`, `src/ui/App.tsx`
 
 **Acceptance:** preview and execute share one code path; buy-denominated
-previews show a live-quote-derived spend.
+previews show a live-quote-derived spend. Verified live: the cap equals the
+quoted `amountIn` (e.g. 2087128569 USDC wei) and beats the oracle estimate.
 
 ---
 
@@ -160,6 +164,7 @@ invisible except for a label.
 | 2026-10-10 | Phase 0.2 done: native Chainlink reads + check-allowance gate. All 5 strategy kinds validate warning-free in KeeperHub. |
 | 2026-10-10 | Phase 0.1 + 0.5 done: MCP client, execute validates (create-disabled → validate → enable), preview validation on demand. 35 tests pass incl. 4 live. |
 | 2026-10-10 | Phase 0.3 + 0.4 done: template fallback (`/api/templates`, suggestions on un-compilable asks, deploy via MCP). 40 tests pass. |
+| 2026-10-10 | Phase 2 done: live `quote-exact-output` caps buy-denominated swaps, shared market context for preview/execute, `/api/markets` + pair probe. 42 tests pass. |
 
 ---
 

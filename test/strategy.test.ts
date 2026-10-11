@@ -131,6 +131,25 @@ test("a buy-denominated size compiles to an exact-output swap", () => {
   assert.ok(!wf.nodes.some((n) => (n.data.config as { actionType?: string }).actionType === "uniswap/swap-exact-input"));
 });
 
+test("a live exact-output budget caps the swap and widens the approve", () => {
+  const { strategy } = planFromText("TWAP buy 5 ETH with USDC over 6 hours");
+  assert.equal(strategy!.sizeUnit, "buy");
+  // swapBudget is the real sell-token cost of one slice, from quote-exact-output.
+  const wf = compileStrategy(strategy!, WALLET, { sellUsd: 1, buyUsd: 2500, swapBudget: 2400 });
+  const swap = wf.nodes.find(
+    (n) => (n.data.config as { actionType?: string }).actionType === "uniswap/swap-exact-output",
+  );
+  const cfg = swap!.data.config as { amountInMaximum: string };
+  // The per-swap cap never exceeds the oracle estimate: min(2187.5, 2400).
+  assert.equal(cfg.amountInMaximum, "2187500000");
+  const approve = wf.nodes.find(
+    (n) => (n.data.config as { actionType?: string }).actionType === "web3/approve-token",
+  );
+  const approveCfg = approve!.data.config as { amount: string };
+  // Approve covers the summed budget (2400 * 6 * 1.05 = 15120 USDC wei), which beats the oracle total.
+  assert.equal(approveCfg.amount, "15120000000");
+});
+
 test("a cash-denominated size compiles to an exact-input swap", () => {
   const { strategy } = planFromText("TWAP spend 100 USDC to buy ETH over 6 hours");
   assert.equal(strategy!.sizeUnit, "sell");

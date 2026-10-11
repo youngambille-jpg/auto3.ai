@@ -99,3 +99,21 @@ test("live: a compiled workflow validates clean over MCP", { skip: !hasKey }, as
     await keeperHub.deleteWorkflow(created.id);
   }
 });
+
+test("live: an exact-output quote caps the compiled swap", { skip: !hasKey }, async () => {
+  const { strategy } = planFromText("TWAP buy 0.05 ETH with USDC over 2 hours");
+  assert.ok(strategy);
+  assert.equal(strategy!.sizeUnit, "buy");
+  const { resolveMarketContext, compileWithContext } = await import("../src/server/context.ts");
+  const ctx = await resolveMarketContext(strategy!);
+  assert.ok(ctx.swapBudget && ctx.swapBudget > 0, "expected a live swap budget");
+  const wf = compileWithContext(strategy!, ctx);
+  const swap = wf.nodes.find(
+    (n) => (n.data.config as { actionType?: string }).actionType === "uniswap/swap-exact-output",
+  );
+  assert.ok(swap, "buy-denominated strategies compile to an exact-output swap");
+  const cap = BigInt((swap!.data.config as { amountInMaximum: string }).amountInMaximum);
+  // The cap must cover the quoted budget (the quote is min()'d with a 5% oracle buffer).
+  assert.ok(cap >= BigInt(Math.floor(ctx.swapBudget!)), `cap ${cap} below budget ${ctx.swapBudget}`);
+});
+

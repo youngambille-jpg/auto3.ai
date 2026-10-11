@@ -17,12 +17,12 @@ import { dirname, join, resolve } from "node:path";
 import { PORT, DEFAULT_CHAIN_ID } from "../config.js";
 import { plan } from "../strategy/llmPlanner.js";
 import { validateStrategy } from "../strategy/planner.js";
-import { compileStrategy } from "../strategy/compile.js";
-import { buildPreview, liveChainlinkPrice } from "./preview.js";
+import { buildPreview } from "./preview.js";
+import { compileWithContext, resolveMarketContext } from "./context.js";
+import { getMarkets, probePair } from "./markets.js";
 import { keeperHub, KeeperHubError } from "../keeperhub/client.js";
 import { keeperHubMcp } from "../keeperhub/mcp.js";
 import { listTemplates, rankTemplates, suggestTemplates, deployTemplate, looksLikeOnchainNeed, type TemplateSummary } from "../keeperhub/templates.js";
-import { isStable } from "../strategy/prices.js";
 import type { Strategy } from "../strategy/spec.js";
 
 const app = express();
@@ -59,6 +59,28 @@ app.get("/api/health", async (_req, res) => {
       process.env.GEMINI_API_KEY ?? process.env.OPENAI_API_KEY ?? process.env.LLM_API_KEY,
     ),
   });
+});
+
+app.get("/api/markets", async (req, res) => {
+  const chainId = typeof req.query?.chainId === "string" ? req.query.chainId : DEFAULT_CHAIN_ID;
+  try {
+    res.json(await getMarkets(chainId));
+  } catch (e) {
+    fail(res, 502, (e as Error).message);
+  }
+});
+
+app.get("/api/markets/pair", async (req, res) => {
+  const chainId = typeof req.query?.chainId === "string" ? req.query.chainId : DEFAULT_CHAIN_ID;
+  const tokenIn = typeof req.query?.tokenIn === "string" ? req.query.tokenIn : "";
+  const tokenOut = typeof req.query?.tokenOut === "string" ? req.query.tokenOut : "";
+  if (!tokenIn || !tokenOut) return fail(res, 400, "tokenIn and tokenOut are required");
+  const fee = typeof req.query?.fee === "string" ? req.query.fee : "500";
+  try {
+    res.json(await probePair(chainId, tokenIn, tokenOut, fee));
+  } catch (e) {
+    fail(res, 502, (e as Error).message);
+  }
 });
 
 app.post("/api/plan", async (req, res) => {
@@ -127,17 +149,9 @@ app.post("/api/execute", async (req, res) => {
 
   let compiled;
   try {
-    const wallet = await keeperHub.wallet();
-    const recipient = wallet.find((i) => i.type === "web3")?.address ?? "";
-    // Buy-denominated sizes need live USD prices to cap the exact-output spend.
-    const [sellUsd, buyUsd] = await Promise.all([
-      isStable(strategy.sellSymbol) ? 1 : liveChainlinkPrice(strategy.sellSymbol),
-      isStable(strategy.buySymbol) ? 1 : liveChainlinkPrice(strategy.buySymbol),
-    ]);
-    compiled = compileStrategy(strategy, recipient, {
-      sellUsd: sellUsd ?? undefined,
-      buyUsd: buyUsd ?? undefined,
-    });
+    // Same resolution the preview card used, so what runs matches what was shown.
+    const ctx = await resolveMarketContext(strategy);
+    compiled = compileWithContext(strategy, ctx);
   } catch (e) {
     return fail(res, 409, `Cannot execute: ${(e as Error).message}`);
   }

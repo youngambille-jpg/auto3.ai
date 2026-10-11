@@ -46,6 +46,7 @@ export function App() {
   const [run, setRun] = useState<RunState | null>(null);
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null);
   const [health, setHealth] = useState<{ walletAddress: string | null; keeperHubAuthOk: boolean; llmConfigured: boolean } | null>(null);
+  const [marketWarning, setMarketWarning] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/health").then((r) => r.json()).then(setHealth).catch(() => {});
@@ -55,6 +56,7 @@ export function App() {
     setError(null);
     setPreview(null);
     setStrategy(null);
+    setMarketWarning(null);
     setTemplates([]);
     setDeployed(null);
     setRun(null);
@@ -77,6 +79,12 @@ export function App() {
       setStrategy(data.strategy);
       setPlanner(data.planner ?? "");
       await loadPreview(data.strategy);
+      // Validate the pair before the user commits: is there actually a pool?
+      const s = data.strategy as Strategy;
+      fetch(`/api/markets/pair?tokenIn=${encodeURIComponent(s.sellToken)}&tokenOut=${encodeURIComponent(s.buyToken)}&fee=${s.fee}`)
+        .then((r) => r.json())
+        .then((p) => setMarketWarning(p.ok ? null : `No live Uniswap pool for this pair at fee ${s.fee}${p.reason ? ` (${p.reason})` : ""}.`))
+        .catch(() => setMarketWarning(null));
     } finally {
       setBusy(false);
     }
@@ -191,6 +199,7 @@ export function App() {
       )}
 
       {error && <div className="errors">{error}</div>}
+      {marketWarning && <div className="errors">{marketWarning}</div>}
 
       {!strategy && templates.length > 0 && (
         <section className="card templates">

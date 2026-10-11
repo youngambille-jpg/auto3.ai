@@ -34,6 +34,12 @@ export function PreviewCard({ strategy, preview, onApprove, onEdit, busy }: Prop
         <Fact label="Pair" value={`${strategy.sellSymbol} → ${strategy.buySymbol}`} />
         <Fact label="Chain" value="Arbitrum One (execution)" />
         <Fact label="Size" value={`${strategy.totalSize} ${strategy.sizeUnit === "buy" ? strategy.buySymbol : strategy.sellSymbol}`} />
+        {preview.budget && (
+          <Fact
+            label="Budget"
+            value={`${preview.budget.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${strategy.sellSymbol} · live quote`}
+          />
+        )}
         {preview.chainlinkPrice != null && (
           <Fact label="Oracle price" value={`$${preview.chainlinkPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} />
         )}

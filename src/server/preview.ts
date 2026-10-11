@@ -5,16 +5,19 @@
  * rather than failing the request.
  */
 
-import { compileStrategy, type CompiledWorkflow } from "../strategy/compile.js";
 import { backtest, type BacktestResult } from "../backtest/engine.js";
 import { fetchCandles, riskySymbol } from "../backtest/candles.js";
 import { keeperHub } from "../keeperhub/client.js";
 import { keeperHubMcp } from "../keeperhub/mcp.js";
 import { findToken } from "../strategy/tokens.js";
 import { decimalToRaw, rawToDecimal } from "../strategy/units.js";
-import { usdFeedFor, rawToPrice, isStable } from "../strategy/prices.js";
+import { isStable } from "../strategy/prices.js";
 import { validateStrategy } from "../strategy/planner.js";
+import { compileWithContext, liveChainlinkPrice, resolveMarketContext, type MarketContext } from "./context.js";
+import type { CompiledWorkflow } from "../strategy/compile.js";
 import type { Strategy } from "../strategy/spec.js";
+
+export { liveChainlinkPrice };
 
 export interface Preview {
   steps: string[];
@@ -24,6 +27,8 @@ export interface Preview {
   chainlinkPrice: number | null;
   quote: { amountOut: string; avgPrice: number; slippagePct: number | null } | null;
   registryQuote: { amountOut: string } | null;
+  /** Buy-denominated: the real sell-token spend for the whole strategy, from a live exact-output quote. */
+  budget: { amountIn: string; amount: number } | null;
   risks: string[];
   validation: { ok: boolean; errors: string[]; warnings: string[] };
   walletAddress: string | null;
@@ -63,28 +68,6 @@ export async function validateCompiled(
     return { ok: false, checked: false, warnings: [] };
   } finally {
     if (id) await keeperHub.deleteWorkflow(id).catch(() => undefined);
-  }
-}
-
-export async function liveChainlinkPrice(symbol: string): Promise<number | null> {
-  const feed = usdFeedFor(symbol);
-  if (!feed) return null;
-  try {
-    const res = await fetch(`${process.env.KEEPERHUB_BASE_URL ?? "https://app.keeperhub.com"}/api/execute/contract-call`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.KEEPERHUB_API_KEY ?? ""}`,
-        "Content-Type": "application/json",
-        "User-Agent": "strategy-studio/0.1",
-      },
-      body: JSON.stringify({ chainId: "42161", contractAddress: feed.address, functionName: "latestAnswer" }),
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (!res.ok) return null;
-    const out = (await res.json()) as { result?: string };
-    return out?.result ? rawToPrice(out.result, feed.decimals) : null;
-  } catch {
-    return null;
   }
 }
 
@@ -140,17 +123,18 @@ export async function buildPreview(
   let chainlinkPrice: number | null = null;
   let quote: Preview["quote"] = null;
   let registryQuote: Preview["registryQuote"] = null;
+  let budget: Preview["budget"] = null;
   let keeperHubValidation: Preview["keeperHubValidation"] = null;
+  let ctx: MarketContext | null = null;
 
   if (opts.withMarket !== false) {
-    chainlinkPrice = await liveChainlinkPrice(symbol);
-    // Prices for both legs let exact-output swaps cap their spend at the oracle.
-    const [sellUsd, buyUsd] = await Promise.all([
-      isStable(s.sellSymbol) ? 1 : liveChainlinkPrice(s.sellSymbol),
-      isStable(s.buySymbol) ? 1 : liveChainlinkPrice(s.buySymbol),
-    ]);
+    // One resolution of wallet + prices + budget, shared with execute.
+    ctx = await resolveMarketContext(s);
+    chainlinkPrice = ctx.riskyPrice;
+    budget = ctx.budget;
+
     try {
-      compiled = compileStrategy(s, walletAddress ?? "", { sellUsd: sellUsd ?? undefined, buyUsd: buyUsd ?? undefined });
+      compiled = compileWithContext(s, ctx);
     } catch (e) {
       risks.push(`Not executable yet: ${(e as Error).message}`);
     }
@@ -206,6 +190,7 @@ export async function buildPreview(
     chainlinkPrice,
     quote,
     registryQuote,
+    budget,
     risks: [...new Set(risks)],
     validation,
     walletAddress,

@@ -120,7 +120,7 @@ export const keeperHub = {
 
   /** Direct protocol read, e.g. a live Uniswap quote. */
   protocolQuote: (actionType: string, params: Record<string, unknown>, chainId = "42161") =>
-    call<{ success: boolean; result?: { amountOut?: string } }>(
+    call<{ success: boolean; result?: { amountOut?: string; amountIn?: string } }>(
       "POST",
       `/api/execute/${actionType}`,
       { chainId, network: chainId, ...params },
