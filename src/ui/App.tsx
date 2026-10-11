@@ -45,7 +45,7 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [run, setRun] = useState<RunState | null>(null);
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null);
-  const [health, setHealth] = useState<{ walletAddress: string | null; keeperHubAuthOk: boolean; llmConfigured: boolean } | null>(null);
+  const [health, setHealth] = useState<{ walletAddress: string | null; keeperHubAuthOk: boolean; llmConfigured: boolean; llmProviders?: Array<{ provider: string; model: string }> } | null>(null);
   const [marketWarning, setMarketWarning] = useState<string | null>(null);
 
   useEffect(() => {
@@ -174,7 +174,12 @@ export function App() {
         <div className="health">
           <span className={health?.keeperHubAuthOk ? "dot ok" : "dot bad"} />
           {health?.keeperHubAuthOk ? "KeeperHub connected" : "KeeperHub not connected"}
-          {health?.llmConfigured ? " · LLM planner" : " · deterministic planner"}
+          {" · "}
+          <span className={health?.llmConfigured ? "" : "bad"}>
+            {health?.llmProviders?.length
+              ? `LLM: ${health.llmProviders.map((p) => p.provider).join(" → ")}`
+              : "no LLM planner configured"}
+          </span>
         </div>
       </header>
 

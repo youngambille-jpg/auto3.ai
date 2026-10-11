@@ -17,8 +17,8 @@ Next.js demo. Both were removed; Strategy Studio is now the whole repo.
 | Path | Role |
 |---|---|
 | `src/strategy/spec.ts` | The typed `Strategy` union. Everything else is an input or output of this shape. |
-| `src/strategy/planner.ts` | Deterministic regex planner + `validateStrategy`. Also repairs LLM output. |
-| `src/strategy/llmPlanner.ts` | Optional LLM planner (Gemini / OpenAI-compatible). Proposes only; always validated. |
+| `src/strategy/planner.ts` | `validateStrategy` + deterministic helpers (`detectChainId`, …). Reused to normalize LLM output — it does NOT plan at runtime. |
+| `src/strategy/llmPlanner.ts` | The planner. Walks the provider chain (Gemini → OpenRouter → OpenAI-compatible). Proposes only; always validated; no regex fallback. |
 | `src/strategy/compile.ts` | Spec → KeeperHub nodes + edges. Pure, unit-tested, no network. |
 | `src/strategy/tokens.ts`, `prices.ts`, `units.ts` | Addresses/decimals, Chainlink feeds, wei conversion. |
 | `src/keeperhub/client.ts` | Thin server-side KeeperHub REST client. |
@@ -54,15 +54,23 @@ npm run build
 - **`/api/execute` requires `{confirmed: true}`.** Never create a workflow
   without it.
 - **The planner proposes, it never executes.** Any LLM output runs through
-  `normalizeProposal` + `validateStrategy` and falls back to regex on error.
+  `normalizeProposal` + `validateStrategy`; an invalid proposal is rejected and
+  the chain moves on — it is never "repaired" into a plan the user did not ask for.
+- **An LLM is required; there is no regex runtime fallback.** The product input
+  is natural language, so a deterministic parser is not a real plan. Providers
+  are tried in order (`llmChain()` in `config.ts`, default
+  `gemini,openrouter,openai`, override with `LLM_PROVIDER_ORDER`). If every
+  provider fails, `/api/plan` returns 503 with the per-provider reasons — never a
+  fabricated strategy. `planFromText` survives only as a test fixture.
 - **Swaps are single-hop.** Multi-level grids/TWAPs are many single-hop orders;
   that decomposition lives in `compile.ts`.
 
 ## Gotchas
 
 - Node/tsx + Vite; `node:test` for tests. No test runner dependency.
-- Gemini (`GEMINI_API_KEY`) is intermittent (~503). The regex fallback is the
-  reliability backbone — never make the LLM path load-bearing.
+- Gemini (`GEMINI_API_KEY`) is intermittent (~503). That is exactly why the
+  provider chain exists: OpenRouter (`OPENROUTER_API_KEY`) is the fallback. Never
+  reintroduce a deterministic parser as the runtime path.
 - KeeperHub workflows are created even when not executed; clean up test
   workflows with `DELETE /api/workflows/:id`.
 - Never commit `.env`. It is gitignored; only `.env.example` is tracked.

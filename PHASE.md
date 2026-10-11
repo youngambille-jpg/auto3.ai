@@ -142,19 +142,47 @@ Verified live in the browser.
 
 ---
 
-## Phase 3 — Latency: regex-first, LLM-refine
+## Phase 3 — LLM-only planner with a provider fallback chain
 
-Planning blocked on Gemini for ~45s when it 503s. That is the worst UX problem.
+The old design leaned on a deterministic regex planner as the "reliability
+backbone" and fell back to it whenever the LLM was down. But the product's only
+input is natural language, so a regex parse is not a real plan — it silently
+shipped a strategy the user never described. This phase removes it from the
+runtime path and makes the LLM reliable instead.
 
-- [ ] 3.1 Return the deterministic plan immediately (<50ms) so the card renders,
-      then refine with the LLM and update the card if the proposal validates.
-- [ ] 3.2 Show which planner produced the plan and allow a one-click re-plan
-      (`deterministic` vs `LLM`).
-- [ ] 3.3 Show the reconciliation when LLM and regex disagree instead of
-      silently preferring one.
+- [x] 3.1 Provider-chain fallback. `llmChain()` in `src/config.ts` builds the
+      ordered list of configured providers (default `gemini,openrouter,openai`,
+      override with `LLM_PROVIDER_ORDER`). `plan()` walks it and returns the
+      first schema-valid proposal; a provider that errors, times out, or
+      proposes something invalid is recorded and skipped.
+- [x] 3.2 No regex runtime fallback. `plan()` no longer calls `planFromText`.
+      When every provider fails, `/api/plan` returns **503** with the
+      per-provider reasons; it never fabricates a plan. `planFromText` is kept
+      only as a test fixture.
+- [x] 3.3 OpenRouter wired in as an OpenAI-compatible provider
+      (`OPENROUTER_API_KEY` + `OPENROUTER_MODEL`, default `openai/gpt-4o-mini`),
+      with attribution headers. `/api/health` now reports the active chain and
+      the UI shows it (`LLM: gemini → openrouter`).
 
-**Acceptance:** first card paint never waits on the network; LLM failure is
-invisible except for a label.
+**Acceptance:** with Gemini down, the same prompt is answered by OpenRouter; if
+all providers fail the user sees an honest error, never a regex plan. Covered by
+`test/llmPlanner.test.ts` (fails over; errors on total failure; a schema-invalid
+proposal does not fall back).
+
+---
+
+## Phase 3b — Latency: stream the plan, don't block the paint (was 3.1–3.3)
+
+Planning blocks on the network. Once the LLM is required, the first paint must
+still not wait on it.
+
+- [ ] 3b.1 Stream progress so the card can show "planning…" with the provider
+      being tried, rather than a blank 45s wait.
+- [ ] 3b.2 Show which provider produced the plan and allow a one-click re-plan
+      (e.g. force OpenRouter).
+
+**Acceptance:** the composer always acknowledges input immediately; provider
+failure is visible, not silent.
 
 ---
 
@@ -191,6 +219,7 @@ invisible except for a label.
 | 2026-10-10 | Phase 0.3 + 0.4 done: template fallback (`/api/templates`, suggestions on un-compilable asks, deploy via MCP). 40 tests pass. |
 | 2026-10-10 | Phase 2 done: live `quote-exact-output` caps buy-denominated swaps, shared market context for preview/execute, `/api/markets` + pair probe. 42 tests pass. |
 | 2026-10-10 | Phase 2.5 done: Perplexity-inspired "quiet instrument" UI pass (turquoise/offblack system, Fraunces display, composer-first layout). Build + 42 tests green; verified live. |
+| 2026-10-11 | Phase 3 done: LLM-only planner with a Gemini → OpenRouter → OpenAI-compatible fallback chain; regex removed from the runtime path (503 on total failure). 48 tests pass. |
 
 ---
 

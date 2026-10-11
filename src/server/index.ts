@@ -14,7 +14,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
-import { PORT, DEFAULT_CHAIN_ID } from "../config.js";
+import { PORT, DEFAULT_CHAIN_ID, llmChain } from "../config.js";
 import { plan } from "../strategy/llmPlanner.js";
 import { validateStrategy } from "../strategy/planner.js";
 import { buildPreview } from "./preview.js";
@@ -49,15 +49,16 @@ app.get("/api/health", async (_req, res) => {
       authOk = false;
     }
   }
+  const chain = llmChain();
   res.json({
     ok: true,
     keeperHubKeyConfigured: hasKey,
     keeperHubAuthOk: authOk,
     walletAddress,
     defaultChainId: DEFAULT_CHAIN_ID,
-    llmConfigured: Boolean(
-      process.env.GEMINI_API_KEY ?? process.env.OPENAI_API_KEY ?? process.env.LLM_API_KEY,
-    ),
+    // The planner requires an LLM; the UI shows which providers are wired up.
+    llmConfigured: chain.length > 0,
+    llmProviders: chain.map((c) => ({ provider: c.provider, model: c.model })),
   });
 });
 
@@ -93,6 +94,15 @@ app.post("/api/plan", async (req, res) => {
   let templateSuggestions: TemplateSummary[] = [];
   if (!result.strategy && looksLikeOnchainNeed(prompt)) {
     templateSuggestions = await suggestTemplates(prompt);
+  }
+  // No strategy means no plan: either the LLM refused the ask or every provider
+  // failed. Surface that as an error status, never as a fabricated plan.
+  if (!result.strategy) {
+    return fail(res, 503, result.error ?? "Could not plan strategy.", {
+      assumptions: result.assumptions,
+      providers: result.providers,
+      templateSuggestions,
+    });
   }
   res.json({ ...result, templateSuggestions });
 });
