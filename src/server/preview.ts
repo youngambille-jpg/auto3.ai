@@ -9,6 +9,7 @@ import { compileStrategy, type CompiledWorkflow } from "../strategy/compile.js";
 import { backtest, type BacktestResult } from "../backtest/engine.js";
 import { fetchCandles, riskySymbol } from "../backtest/candles.js";
 import { keeperHub } from "../keeperhub/client.js";
+import { keeperHubMcp } from "../keeperhub/mcp.js";
 import { findToken } from "../strategy/tokens.js";
 import { decimalToRaw, rawToDecimal } from "../strategy/units.js";
 import { usdFeedFor, rawToPrice, isStable } from "../strategy/prices.js";
@@ -26,6 +27,43 @@ export interface Preview {
   risks: string[];
   validation: { ok: boolean; errors: string[]; warnings: string[] };
   walletAddress: string | null;
+  /** KeeperHub-side validation of the compiled workflow, when we could run it. */
+  keeperHubValidation: { ok: boolean; checked: boolean; warnings: string[] } | null;
+}
+
+/**
+ * KeeperHub has no validate-before-create, so a compiled workflow is created
+ * disabled, validated, and deleted. Returns KeeperHub's warnings; `checked`
+ * is false when the call could not run (so the caller can tell "clean" from
+ * "unknown").
+ */
+export async function validateCompiled(
+  compiled: CompiledWorkflow,
+): Promise<{ ok: boolean; checked: boolean; warnings: string[] }> {
+  let id: string | undefined;
+  try {
+    const created = await keeperHub.createWorkflow({
+      name: `__validate__ ${compiled.name}`.slice(0, 80),
+      description: compiled.description,
+      nodes: compiled.nodes,
+      edges: compiled.edges,
+      enabled: false,
+    });
+    id = created?.id;
+    if (!id) return { ok: false, checked: false, warnings: [] };
+    const v = await keeperHubMcp.validateWorkflow(id);
+    const warnings = (v.warnings ?? [])
+      .map((w) => (w.code ? `${w.code}: ${w.message ?? ""}`.trim() : w.message ?? ""))
+      .filter(Boolean);
+    const errors = (v.errors ?? [])
+      .map((e) => (e.code ? `${e.code}: ${e.message ?? ""}`.trim() : e.message ?? ""))
+      .filter(Boolean);
+    return { ok: v.valid && errors.length === 0, checked: true, warnings: [...errors, ...warnings] };
+  } catch {
+    return { ok: false, checked: false, warnings: [] };
+  } finally {
+    if (id) await keeperHub.deleteWorkflow(id).catch(() => undefined);
+  }
 }
 
 export async function liveChainlinkPrice(symbol: string): Promise<number | null> {
@@ -62,7 +100,10 @@ function quoteSlippage(s: Strategy, quoteAvgPrice: number, oraclePrice: number |
   return ((fair - quoteAvgPrice) / fair) * 100;
 }
 
-export async function buildPreview(s: Strategy, opts: { withMarket?: boolean } = {}): Promise<Preview> {
+export async function buildPreview(
+  s: Strategy,
+  opts: { withMarket?: boolean; withKeeperHubValidation?: boolean } = {},
+): Promise<Preview> {
   const validation = validateStrategy(s);
   const risks: string[] = [...validation.warnings];
 
@@ -99,6 +140,7 @@ export async function buildPreview(s: Strategy, opts: { withMarket?: boolean } =
   let chainlinkPrice: number | null = null;
   let quote: Preview["quote"] = null;
   let registryQuote: Preview["registryQuote"] = null;
+  let keeperHubValidation: Preview["keeperHubValidation"] = null;
 
   if (opts.withMarket !== false) {
     chainlinkPrice = await liveChainlinkPrice(symbol);
@@ -143,6 +185,15 @@ export async function buildPreview(s: Strategy, opts: { withMarket?: boolean } =
         // no quote available; leave null
       }
     }
+
+    // Ask KeeperHub to validate the compiled graph. Ternary-gated off by
+    // default; it costs a create + delete round trip.
+    if (compiled && opts.withKeeperHubValidation) {
+      keeperHubValidation = await validateCompiled(compiled);
+      if (keeperHubValidation.checked && keeperHubValidation.warnings.length) {
+        risks.push(`KeeperHub validation: ${keeperHubValidation.warnings.join("; ")}`);
+      }
+    }
   }
 
   return {
@@ -158,5 +209,6 @@ export async function buildPreview(s: Strategy, opts: { withMarket?: boolean } =
     risks: [...new Set(risks)],
     validation,
     walletAddress,
+    keeperHubValidation,
   };
 }

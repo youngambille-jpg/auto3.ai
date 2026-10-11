@@ -20,6 +20,7 @@ import { validateStrategy } from "../strategy/planner.js";
 import { compileStrategy } from "../strategy/compile.js";
 import { buildPreview, liveChainlinkPrice } from "./preview.js";
 import { keeperHub, KeeperHubError } from "../keeperhub/client.js";
+import { keeperHubMcp } from "../keeperhub/mcp.js";
 import { isStable } from "../strategy/prices.js";
 import type { Strategy } from "../strategy/spec.js";
 
@@ -73,7 +74,9 @@ app.post("/api/preview", async (req, res) => {
   const validation = validateStrategy(strategy);
   if (!validation.ok) return fail(res, 400, "invalid strategy", { validation });
   try {
-    const preview = await buildPreview(strategy);
+    const preview = await buildPreview(strategy, {
+      withKeeperHubValidation: req.body?.withKeeperHubValidation === true,
+    });
     res.json({ strategy, preview });
   } catch (e) {
     fail(res, 500, (e as Error).message);
@@ -116,8 +119,21 @@ app.post("/api/execute", async (req, res) => {
       description: compiled.description,
       nodes: compiled.nodes,
       edges: compiled.edges,
+      enabled: false,
     });
     if (!wf?.id) return fail(res, 502, "KeeperHub did not return a workflow id");
+
+    // Validate before spending anything. A clean check plus an enabled flag is
+    // what turns the workflow live; a hard error rolls it back.
+    const check = await keeperHubMcp.validateWorkflow(wf.id).catch(() => null);
+    if (check && !check.valid) {
+      await keeperHub.deleteWorkflow(wf.id).catch(() => undefined);
+      return fail(res, 422, "KeeperHub rejected the compiled workflow", {
+        validation: check,
+      });
+    }
+    await keeperHubMcp.updateWorkflow(wf.id, { enabled: true });
+
     const run = await keeperHub.executeWorkflow(wf.id, {});
     res.json({
       workflowId: wf.id,
@@ -125,6 +141,7 @@ app.post("/api/execute", async (req, res) => {
       executionId: run.executionId,
       status: run.status,
       steps: compiled.steps,
+      validation: check ?? null,
     });
   } catch (e) {
     if (e instanceof KeeperHubError) return fail(res, e.status >= 400 && e.status < 600 ? e.status : 502, e.message, { keeperhub: e.body });

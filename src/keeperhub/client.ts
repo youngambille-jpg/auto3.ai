@@ -89,7 +89,7 @@ export const keeperHub = {
   wallet: () =>
     call<Array<{ id: string; type: string; address?: string }>>("GET", "/api/integrations"),
 
-  createWorkflow: (wf: { name: string; description?: string; nodes: unknown[]; edges: unknown[] }) =>
+  createWorkflow: (wf: { name: string; description?: string; nodes: unknown[]; edges: unknown[]; enabled?: boolean }) =>
     call<KeeperHubWorkflow>("POST", "/api/workflows/create", wf),
   deleteWorkflow: (id: string) => call<{ success: boolean }>("DELETE", `/api/workflows/${id}?force=true`),
   executeWorkflow: (id: string, input: Record<string, unknown> = {}) =>

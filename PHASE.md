@@ -14,9 +14,13 @@ unless a phase explicitly says otherwise.
 KeeperHub *is* a workflow engine, and it already ships the building blocks we
 are hand-rolling. Findings are in the appendix below. This phase adopts them.
 
-- [ ] 0.1 Call `validate_workflow` on every compiled workflow before
-      `/api/execute` creates it, and surface its warnings on the preview card.
-      It already flags things we miss, e.g. `approve-without-allowance-check`.
+- [x] 0.1 Validate before executing. KeeperHub's `validate_workflow` needs an
+      existing workflow id (no validate-before-create), so `/api/execute` now
+      creates the workflow **disabled**, validates it, and only then enables and
+      runs it; a hard error rolls the workflow back and returns the findings.
+      The preview can also surface KeeperHub's warnings via
+      `{withKeeperHubValidation: true}`, which creates, validates and deletes a
+      throwaway copy.
 - [x] 0.2 Use KeeperHub's native actions where they map, instead of raw
       contract reads:
       - `chainlink/eth-usd-latest-round-data` instead of `web3/read-contract`
@@ -38,10 +42,14 @@ are hand-rolling. Findings are in the appendix below. This phase adopts them.
       `update_workflow` (replace nodes/edges with ours) → `validate_workflow`.
       Keep `create_workflow` for from-scratch strategies; it is equivalent and
       already tested.
-- [ ] 0.5 Add the MCP surface to the client (`deploy_template`,
+- [x] 0.5 Add the MCP surface to the client (`deploy_template`,
       `update_workflow`, `validate_workflow`, `search_templates`,
       `list_action_schemas`) behind one thin wrapper, so the strategy code does
       not care whether it talks REST or MCP.
+      - `src/keeperhub/mcp.ts` handles the JSON-RPC handshake and session,
+        parses both JSON and SSE bodies, re-handshakes on a dropped session,
+        and unwraps tool payloads. `validate_workflow` is wired into
+        preview/execute; the rest is exposed for Phase 0.3/0.4.
 
 **Acceptance:** a preview shows KeeperHub's validation warnings; a price read
 uses a native action; an uncompilable prompt offers a real template.
@@ -145,6 +153,7 @@ invisible except for a label.
 | 2026-10-10 | Phase 1 complete: honest backtest ledger, direction-aware triggers, Sepolia rejected, dead code removed. 27 tests pass. |
 | 2026-10-10 | KeeperHub recon: template catalog, MCP tools, validate_workflow. Phase 0 added. |
 | 2026-10-10 | Phase 0.2 done: native Chainlink reads + check-allowance gate. All 5 strategy kinds validate warning-free in KeeperHub. |
+| 2026-10-10 | Phase 0.1 + 0.5 done: MCP client, execute validates (create-disabled → validate → enable), preview validation on demand. 35 tests pass incl. 4 live. |
 
 ---
 

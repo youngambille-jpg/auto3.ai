@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { planFromText } from "../src/strategy/planner.ts";
 import { compileStrategy } from "../src/strategy/compile.ts";
 import { keeperHub } from "../src/keeperhub/client.ts";
+import { keeperHubMcp } from "../src/keeperhub/mcp.ts";
 
 const hasKey = Boolean(process.env.KEEPERHUB_API_KEY);
 
@@ -69,5 +70,32 @@ test("live: execute a read-only workflow end to end", { skip: !hasKey }, async (
   } finally {
     const del = await keeperHub.deleteWorkflow(created.id);
     assert.equal(del.success, true);
+  }
+});
+
+test("live: a compiled workflow validates clean over MCP", { skip: !hasKey }, async () => {
+  const { strategy } = planFromText("Limit buy 1 ETH at 2400 with USDC");
+  assert.ok(strategy);
+  const wallet = await keeperHub.wallet();
+  const recipient = wallet.find((i) => i.type === "web3")?.address ?? "";
+  const wf = compileStrategy(strategy!, recipient, { sellUsd: 1, buyUsd: 2500 });
+
+  const created = await keeperHub.createWorkflow({
+    name: `[test] validate ${wf.name}`,
+    description: wf.description,
+    nodes: wf.nodes,
+    edges: wf.edges,
+    enabled: false,
+  });
+  assert.ok(created.id);
+  try {
+    const v = await keeperHubMcp.validateWorkflow(created.id);
+    assert.equal(v.valid, true, "compiled workflow should be valid");
+    // The check-allowance gate is what removed the old
+    // approve-without-allowance-check warning.
+    const codes = (v.warnings ?? []).map((w) => w.code);
+    assert.ok(!codes.includes("approve-without-allowance-check"), `unexpected warning: ${codes}`);
+  } finally {
+    await keeperHub.deleteWorkflow(created.id);
   }
 });
