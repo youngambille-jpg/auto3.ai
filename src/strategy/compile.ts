@@ -13,7 +13,7 @@
 import type { Strategy } from "./spec.js";
 import { decimalToRaw } from "./units.js";
 import { findToken } from "./tokens.js";
-import { isStable, usdFeedFor, CHAINLINK_ABI } from "./prices.js";
+import { isStable, usdFeedFor, nativeFeedAction, CHAINLINK_ABI } from "./prices.js";
 import { DEFAULT_FEE } from "./tokens.js";
 
 /**
@@ -84,30 +84,63 @@ function manualTrigger(id: string): WorkflowNode {
   return { id, type: "trigger", data: { label: "Manual", type: "trigger", config: { triggerType: "Manual" }, status: "idle" } };
 }
 
-function usdReadNode(id: string, label: string, symbol: string): WorkflowNode | undefined {
-  const feed = usdFeedFor(symbol);
-  if (!feed) return undefined;
-  return action(id, label, {
-    actionType: "web3/read-contract",
-    network: EXECUTION_CHAIN,
-    contractAddress: feed.address,
-    abi: CHAINLINK_ABI,
-    abiFunction: "latestAnswer",
-  }, `${feed.symbol} Chainlink price feed, 8 decimals`);
+/** Uniswap V3 SwapRouter02 on Arbitrum One. */
+const UNISWAP_ROUTER = "0xE592427A0AEce92De3Edee1F18E0157C05861564";
+
+/** KeeperHub token selection config for a known token address. */
+function tokenConfig(s: Strategy): string {
+  const token = findToken(s.chainId, s.sellToken);
+  return JSON.stringify({
+    mode: "custom",
+    customToken: { address: s.sellToken, symbol: s.sellSymbol, decimals: token?.decimals ?? 18 },
+  });
 }
 
-function conditionNode(id: string, ref: string, op: string, value: string): WorkflowNode {
+/**
+ * A USD price read for `symbol`, preferring KeeperHub's native Chainlink action
+ * and falling back to a generic read over our address registry. Returns the node
+ * plus the template ref to its raw (8-decimal) answer.
+ */
+function priceRead(id: string, label: string, symbol: string): { node: WorkflowNode; ref: string } | undefined {
+  const native = nativeFeedAction(symbol);
+  if (native) {
+    return {
+      node: action(id, label, { actionType: native, network: EXECUTION_CHAIN }, `${symbol}/USD via KeeperHub's native Chainlink read`),
+      ref: `{{@${id}:${label}.result.answer}}`,
+    };
+  }
+  const feed = usdFeedFor(symbol);
+  if (!feed) return undefined;
+  return {
+    node: action(id, label, {
+      actionType: "web3/read-contract",
+      network: EXECUTION_CHAIN,
+      contractAddress: feed.address,
+      abi: CHAINLINK_ABI,
+      abiFunction: "latestAnswer",
+    }, `${feed.symbol} Chainlink price feed, 8 decimals`),
+    ref: `{{@${id}:${label}.result}}`,
+  };
+}
+
+function conditionNode(
+  id: string,
+  ref: string,
+  op: string,
+  value: string,
+  description?: string,
+): WorkflowNode {
   return action(id, "Condition", {
     actionType: "Condition",
     condition: `${ref} ${op} ${value}`,
     conditionConfig: {
       group: {
-        id: "g1",
+        id: `g-${id}`,
         logic: "AND",
-        rules: [{ id: "r1", leftOperand: ref, operator: op, rightOperand: value }],
+        rules: [{ id: `r-${id}`, leftOperand: ref, operator: op, rightOperand: value }],
       },
     },
-  });
+  }, description);
 }
 
 function swapNode(
@@ -208,14 +241,56 @@ function oracleInputCap(s: Strategy, buyAmount: number, prices: CompilePrices): 
 }
 
 function approveNode(id: string, s: Strategy, amountRaw: string): WorkflowNode {
-  const token = findToken(s.chainId, s.sellToken);
   return action(id, `Approve ${s.sellSymbol}`, {
     actionType: "web3/approve-token",
     network: s.chainId,
-    tokenConfig: JSON.stringify({ mode: "custom", customToken: { address: s.sellToken, symbol: s.sellSymbol, decimals: token?.decimals ?? 18 } }),
-    spenderAddress: "0xE592427A0AEce92De3Edee1F18E0157C05861564", // Uniswap V3 SwapRouter02
+    tokenConfig: tokenConfig(s),
+    spenderAddress: UNISWAP_ROUTER,
     amount: amountRaw,
-  }, "One-time allowance so the router can move your sell token");
+  }, "Allowance so the router can move your sell token");
+}
+
+/**
+ * Guard the approve so it only sends a transaction when the current allowance is
+ * short. Emits three nodes — a read, a Condition, and the approve — plus edges:
+ *
+ *   ... -> read -> cond --(true: allowance short)--> approve
+ *                     \--(false: already covered)--> (skip; joins at `mergeId`)
+ *
+ * Returns the edges to splice in and the node id that follows the guard.
+ */
+function allowanceGate(
+  readId: string,
+  condId: string,
+  approve: WorkflowNode,
+  s: Strategy,
+  amountRaw: string,
+  ownerAddress: string,
+  incoming: { source: string; sourceHandle?: "true" | "false" },
+): { nodes: WorkflowNode[]; edges: WorkflowEdge[]; joinId: string } {
+  const read = action(readId, `Check ${s.sellSymbol} allowance`, {
+    actionType: "web3/check-allowance",
+    network: s.chainId,
+    tokenConfig: tokenConfig(s),
+    ownerAddress,
+    spenderAddress: UNISWAP_ROUTER,
+  }, `Reads the current allowance before deciding to approve`);
+
+  const cond = conditionNode(
+    condId,
+    `{{@${readId}:Check ${s.sellSymbol} allowance.allowanceRaw}}`,
+    "<",
+    amountRaw,
+    "Approve only when the allowance is short",
+  );
+
+  const edges: WorkflowEdge[] = [
+    { id: `${readId}-in`, source: incoming.source, target: readId, ...(incoming.sourceHandle ? { sourceHandle: incoming.sourceHandle } : {}) },
+    { id: `${readId}-cond`, source: readId, target: condId },
+    { id: `${condId}-approve`, source: condId, target: approve.id, sourceHandle: "true" },
+  ];
+
+  return { nodes: [read, cond, approve], edges, joinId: approve.id };
 }
 
 /**
@@ -256,15 +331,10 @@ export function compileStrategy(
     );
     const approveTotal = buyDenominated ? oracleInputCap(s, s.totalSize, prices) : s.totalSize;
     const totalRaw = decimalToRaw(approveTotal, sellDecimals);
-    const nodes: WorkflowNode[] = [
-      scheduleTrigger("trigger-1", s.intervalMinutes),
-      approveNode("approve-1", s, totalRaw),
-      swap,
-    ];
-    const edges: WorkflowEdge[] = [
-      { id: "e1", source: "trigger-1", target: "approve-1" },
-      { id: "e2", source: "approve-1", target: "swap-1" },
-    ];
+    const approve = approveNode("approve-1", s, totalRaw);
+    const gate = allowanceGate("allow-1", "cond-allow", approve, s, totalRaw, recipient, { source: "trigger-1" });
+    const nodes: WorkflowNode[] = [scheduleTrigger("trigger-1", s.intervalMinutes), ...gate.nodes, swap];
+    const edges: WorkflowEdge[] = [...gate.edges, { id: "e-swap", source: gate.joinId, target: "swap-1" }];
     const perSliceLabel = buyDenominated ? `${perSlice} ${s.buySymbol}` : `${perSlice} ${s.sellSymbol}`;
     return {
       name: `${s.kind.toUpperCase()} buy ${s.totalSize} ${s.buySymbol} with ${s.sellSymbol}`,
@@ -273,7 +343,7 @@ export function compileStrategy(
       edges,
       steps: [
         `Every ${s.intervalMinutes} min, one scheduled run fires.`,
-        `Approve ${s.sellSymbol} for the Uniswap router (first run).`,
+        `Approve ${s.sellSymbol} for the Uniswap router only when the allowance is short.`,
         buyDenominated
           ? `Acquire ${perSlice} ${s.buySymbol} per slice (spending at most the oracle-capped ${s.sellSymbol}).`
           : `Swap ${perSlice} ${s.sellSymbol} -> ${s.buySymbol} (slice executed on schedule).`,
@@ -285,7 +355,7 @@ export function compileStrategy(
     // The trigger is expressed in USD terms of the risky asset (e.g. ETH at
     // $2400), so read the non-stable leg's feed regardless of which side is cash.
     const priceSymbol = isStable(s.sellSymbol) ? s.buySymbol : s.sellSymbol;
-    const read = usdReadNode("read-1", `Read ${priceSymbol}/USD`, priceSymbol);
+    const read = priceRead("read-1", `Read ${priceSymbol}/USD`, priceSymbol);
     if (!read) throw new Error(`No Chainlink price feed for ${priceSymbol}.`);
     const price = s.kind === "limit" ? s.limitPrice : s.stopPrice;
     const rawPrice = decimalToRaw(price, 8);
@@ -294,7 +364,7 @@ export function compileStrategy(
     const op = s.side === "buy"
       ? (s.kind === "limit" ? "<=" : ">=")
       : (s.kind === "limit" ? ">=" : "<=");
-    const condition = conditionNode("cond-1", "{{@read-1:Read " + priceSymbol + "/USD.result}}", op, rawPrice);
+    const condition = conditionNode("cond-1", read.ref, op, rawPrice);
     const buyDenominated = s.sizeUnit === "buy";
     const approveTotal = buyDenominated ? oracleInputCap(s, s.totalSize, prices) : s.totalSize;
     const totalRaw = decimalToRaw(approveTotal, sellDecimals);
@@ -309,18 +379,20 @@ export function compileStrategy(
       recipient,
       prices,
     );
+    const approve = approveNode("approve-1", s, totalRaw);
+    const gate = allowanceGate("allow-1", "cond-allow", approve, s, totalRaw, recipient, { source: "cond-1", sourceHandle: "true" });
     const nodes: WorkflowNode[] = [
       scheduleTrigger("trigger-1", 5),
-      read,
+      read.node,
       condition,
-      approveNode("approve-1", s, totalRaw),
+      ...gate.nodes,
       swap,
     ];
     const edges: WorkflowEdge[] = [
       { id: "e1", source: "trigger-1", target: "read-1" },
       { id: "e2", source: "read-1", target: "cond-1" },
-      { id: "e3", source: "cond-1", target: "approve-1", sourceHandle: "true" },
-      { id: "e4", source: "approve-1", target: "swap-1" },
+      ...gate.edges,
+      { id: "e-swap", source: gate.joinId, target: "swap-1" },
     ];
     const when = s.kind === "limit"
       ? `price ${op} ${price} USD`
@@ -335,15 +407,15 @@ export function compileStrategy(
         "Check Chainlink price every 5 minutes.",
         `When ${priceSymbol}/USD ${op} ${price}, fire.`,
         buyDenominated
-          ? `Approve ${s.sellSymbol}, then acquire ${sizeLabel} (spending at most the oracle-capped amount).`
-          : `Approve ${s.sellSymbol}, then swap ${sizeLabel} -> ${s.buySymbol}.`,
+          ? `Approve ${s.sellSymbol} only if the allowance is short, then acquire ${sizeLabel} (spending at most the oracle-capped amount).`
+          : `Approve ${s.sellSymbol} only if the allowance is short, then swap ${sizeLabel} -> ${s.buySymbol}.`,
       ],
     };
   }
 
   if (s.kind === "grid") {
     const priceSymbol = isStable(s.sellSymbol) ? s.buySymbol : s.sellSymbol;
-    const read = usdReadNode("read-1", `Read ${priceSymbol}/USD`, priceSymbol);
+    const read = priceRead("read-1", `Read ${priceSymbol}/USD`, priceSymbol);
     if (!read) throw new Error(`No Chainlink price feed for ${priceSymbol}.`);
     const rawHigh = decimalToRaw(s.upperPrice, 8);
     const rawLow = decimalToRaw(s.lowerPrice, 8);
@@ -366,20 +438,22 @@ export function compileStrategy(
     // A single-level-per-run grid: each scheduled check that finds the price
     // inside the band places one level-sized buy. Fine-grained grids would use
     // KeeperHub state to track which levels are filled; this MVP keeps one guard.
+    const approve = approveNode("approve-1", s, totalRaw);
+    const gate = allowanceGate("allow-1", "cond-allow", approve, s, totalRaw, recipient, { source: "cond-above-low", sourceHandle: "true" });
     const nodes: WorkflowNode[] = [
       scheduleTrigger("trigger-1", 5),
-      read,
-      conditionNode("cond-in", "{{@read-1:Read " + priceSymbol + "/USD.result}}", "<=", rawHigh),
-      conditionNode("cond-above-low", "{{@read-1:Read " + priceSymbol + "/USD.result}}", ">=", rawLow),
-      approveNode("approve-1", s, totalRaw),
+      read.node,
+      conditionNode("cond-in", read.ref, "<=", rawHigh),
+      conditionNode("cond-above-low", read.ref, ">=", rawLow),
+      ...gate.nodes,
       swap,
     ];
     const edges: WorkflowEdge[] = [
       { id: "e1", source: "trigger-1", target: "read-1" },
       { id: "e2", source: "read-1", target: "cond-in" },
       { id: "e3", source: "cond-in", target: "cond-above-low", sourceHandle: "true" },
-      { id: "e4", source: "cond-above-low", target: "approve-1", sourceHandle: "true" },
-      { id: "e5", source: "approve-1", target: "swap-buy-1" },
+      ...gate.edges,
+      { id: "e-swap", source: gate.joinId, target: "swap-buy-1" },
     ];
     return {
       name: `Grid ${s.sellSymbol}->${s.buySymbol} ${s.lowerPrice}-${s.upperPrice}`,

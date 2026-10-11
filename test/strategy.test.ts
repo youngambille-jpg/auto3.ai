@@ -151,3 +151,72 @@ test("a grid sized in the acquired asset is buy-denominated", () => {
   assert.equal(strategy!.totalSize, 2);
   assert.equal((strategy as { levels: number }).levels, 4);
 });
+
+test("a price read uses the native Chainlink action and a structured ref", () => {
+  const { strategy } = planFromText("Limit buy 1 ETH at 2400 with USDC");
+  const wf = compileStrategy(strategy!, WALLET);
+  const read = wf.nodes.find((n) => (n.data.config as { actionType?: string }).actionType === "chainlink/eth-usd-latest-round-data");
+  assert.ok(read, "expected the native ETH/USD read");
+  // No hand-rolled ABI read for a symbol the native action covers.
+  assert.ok(!wf.nodes.some((n) => (n.data.config as { actionType?: string }).actionType === "web3/read-contract"));
+  const cond = wf.nodes.find((n) => (n.data.config as { actionType?: string }).actionType === "Condition");
+  const rule = (cond!.data.config as { conditionConfig: { group: { rules: Array<{ leftOperand: string }> } } })
+    .conditionConfig.group.rules[0]!;
+  assert.match(rule.leftOperand, /Read ETH\/USD\.result\.answer\}\}$/);
+});
+
+test("an uncovered symbol falls back to a read-contract over the feed registry", () => {
+  const { strategy } = planFromText("Limit buy 1 ARB at 2 with USDC");
+  assert.equal(strategy!.buySymbol, "ARB");
+  const wf = compileStrategy(strategy!, WALLET);
+  const read = wf.nodes.find((n) => (n.data.config as { actionType?: string }).actionType === "web3/read-contract");
+  assert.ok(read, "expected the generic read-contract fallback");
+  assert.ok(!wf.nodes.some((n) => (n.data.config as { actionType?: string }).actionType === "chainlink/eth-usd-latest-round-data"));
+});
+
+test("the approve is guarded by an allowance check on the true branch", () => {
+  const { strategy } = planFromText("TWAP buy 5 ETH with USDC over 6 hours");
+  const wf = compileStrategy(strategy!, WALLET, { sellUsd: 1, buyUsd: 2500 });
+  const chk = wf.nodes.find((n) => (n.data.config as { actionType?: string }).actionType === "web3/check-allowance");
+  assert.ok(chk, "expected a check-allowance node");
+  const cfg = chk!.data.config as { ownerAddress: string; spenderAddress: string };
+  assert.equal(cfg.ownerAddress, WALLET);
+  assert.match(cfg.spenderAddress, /^0x[0-9a-fA-F]{40}$/);
+  // The approve is only reached when the allowance condition is true.
+  const guardEdge = wf.edges.find((e) => e.target === "approve-1");
+  assert.ok(guardEdge);
+  assert.equal(guardEdge!.sourceHandle, "true");
+  assert.equal(guardEdge!.source, "cond-allow");
+  // The Condition tests the raw allowance against the required amount.
+  const cond = wf.nodes.find((n) => n.id === "cond-allow")!;
+  const rule = (cond.data.config as { conditionConfig: { group: { rules: Array<{ operator: string; leftOperand: string }> } } })
+    .conditionConfig.group.rules[0]!;
+  assert.equal(rule.operator, "<");
+  assert.match(rule.leftOperand, /Check USDC allowance\.allowanceRaw\}\}$/);
+});
+
+test("every node is wired: no orphan nodes and no dangling edges", () => {
+  for (const prompt of [
+    "TWAP buy 5 ETH with USDC over 6 hours",
+    "Limit buy 1 ETH at 2400 with USDC",
+    "Stop loss: sell 1 ETH if price drops to 2200",
+    "Grid ETH between 2400 and 2800 with 4 levels, 2 ETH total",
+  ]) {
+    const { strategy } = planFromText(prompt);
+    const wf = compileStrategy(strategy!, WALLET, { sellUsd: 1, buyUsd: 2500 });
+    const ids = new Set(wf.nodes.map((n) => n.id));
+    for (const e of wf.edges) {
+      assert.ok(ids.has(e.source), `missing source ${e.source} in ${prompt}`);
+      assert.ok(ids.has(e.target), `missing target ${e.target} in ${prompt}`);
+    }
+    const reached = new Set(wf.edges.flatMap((e) => [e.source, e.target]));
+    for (const n of wf.nodes) {
+      assert.ok(reached.has(n.id), `orphan node ${n.id} in ${prompt}`);
+    }
+    // Condition groups must not share ids across nodes.
+    const groupIds = wf.nodes
+      .map((n) => (n.data.config as { conditionConfig?: { group: { id: string } } }).conditionConfig?.group.id)
+      .filter((x): x is string => Boolean(x));
+    assert.equal(new Set(groupIds).size, groupIds.length, `duplicate condition group ids in ${prompt}`);
+  }
+});

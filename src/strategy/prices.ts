@@ -27,6 +27,27 @@ export function usdFeedFor(symbol: string): PriceFeed | undefined {
   return CHAINLINK_FEEDS[symbol.toUpperCase()];
 }
 
+/**
+ * KeeperHub native Chainlink read actions, keyed by symbol. These avoid
+ * hand-rolling an ABI and a contract address in the workflow, and return a
+ * structured `result.answer`. Symbols with no native action fall back to a
+ * generic `web3/read-contract` over `CHAINLINK_FEEDS`.
+ */
+const NATIVE_FEED_ACTIONS: Record<string, string> = {
+  ETH: "chainlink/eth-usd-latest-round-data",
+  WETH: "chainlink/eth-usd-latest-round-data",
+  BTC: "chainlink/btc-usd-latest-round-data",
+  WBTC: "chainlink/btc-usd-latest-round-data",
+  LINK: "chainlink/link-usd-latest-round-data",
+  USDC: "chainlink/usdc-usd-latest-round-data",
+  DAI: "chainlink/dai-usd-latest-round-data",
+  USDT: "chainlink/usdt-usd-latest-round-data",
+};
+
+export function nativeFeedAction(symbol: string): string | undefined {
+  return NATIVE_FEED_ACTIONS[symbol.toUpperCase()];
+}
+
 export const STABLE_SYMBOLS = new Set(["USDC", "USDT", "DAI"]);
 
 /**

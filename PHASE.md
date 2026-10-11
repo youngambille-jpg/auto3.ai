@@ -17,13 +17,19 @@ are hand-rolling. Findings are in the appendix below. This phase adopts them.
 - [ ] 0.1 Call `validate_workflow` on every compiled workflow before
       `/api/execute` creates it, and surface its warnings on the preview card.
       It already flags things we miss, e.g. `approve-without-allowance-check`.
-- [ ] 0.2 Use KeeperHub's native actions where they map, instead of raw
+- [x] 0.2 Use KeeperHub's native actions where they map, instead of raw
       contract reads:
       - `chainlink/eth-usd-latest-round-data` instead of `web3/read-contract`
-        + inline ABI for the price read.
+        + inline ABI for the price read. Covered for ETH, WETH, BTC, WBTC,
+        LINK, USDC, DAI, USDT; other symbols keep the registry fallback.
       - `web3/check-allowance` upstream of the approve, with a Condition that
         skips the approve when the allowance already covers it (removes a
-        pointless transaction per run).
+        pointless transaction per run). The check reads `allowanceRaw` and the
+        gate fires the approve only on the `true` branch.
+      A `create_workflow` + `validate_workflow` pass over all five strategy
+      kinds now reports **zero warnings** (the old `Limit buy 50 ETH` reported
+      `approve-without-allowance-check`), so this work also satisfies 0.1's
+      intent for the approve path.
 - [ ] 0.3 Template catalog: fetch `GET /api/workflows/public` (118 templates)
       and expose it as a starting point for prompts we cannot compile. For an
       out-of-scope ask ("monitor my Aave health factor"), offer the matching
@@ -138,6 +144,7 @@ invisible except for a label.
 | — | Plan created. |
 | 2026-10-10 | Phase 1 complete: honest backtest ledger, direction-aware triggers, Sepolia rejected, dead code removed. 27 tests pass. |
 | 2026-10-10 | KeeperHub recon: template catalog, MCP tools, validate_workflow. Phase 0 added. |
+| 2026-10-10 | Phase 0.2 done: native Chainlink reads + check-allowance gate. All 5 strategy kinds validate warning-free in KeeperHub. |
 
 ---
 
@@ -185,22 +192,38 @@ signer-routing-key-ignored
   …
 ```
 
-Both are real: we approve on every run and re-approve an exact amount that the
-following swap already consumes.
+Both are real: we approved on every run and re-approved an exact amount that the
+following swap already consumes. Phase 0.2 fixes the first; the second is about
+which signer key routes the node and is handled by leaving `_protocolMeta`
+unset. After 0.2, all five strategy kinds validate with **zero warnings**.
+
+### Allowance gate semantics (verified)
+
+Confirmed by building a probe workflow with `create_workflow` and validating it:
+
+- A node may have **two incoming edges**; KeeperHub accepts the diamond where
+  the allowance Condition's `false` branch and the `approve →` edge both land on
+  the swap. No merge node is required.
+- A Condition must carry a `sourceHandle` of `"true"` / `"false"` on its outgoing
+  edges; the graph branch is selected by that handle.
+- `web3/check-allowance` outputs `allowanceRaw` (wei string) and `allowance`
+  (human). The gate compares `allowanceRaw < required` and approves only then.
+- Condition groups need **unique `group.id` per node**; we key them by node id.
 
 ### Actions / triggers available
 
 - Triggers: `Schedule`, `Event`, `Block`, `Webhook`, `Manual`.
-- Native actions we should prefer: `chainlink/eth-usd-latest-round-data`,
-  `chainlink/btc-usd-latest-round-data`, `web3/check-allowance`,
-  `web3/read-contract`, `web3/approve-token`, `uniswap/swap-exact-input`,
+- Native actions we prefer: `chainlink/{eth,btc,link,usdc,dai,usdt}-usd-latest-round-data`
+  (structured `result.answer`), `web3/check-allowance`, `web3/read-contract`,
+  `web3/approve-token`, `uniswap/swap-exact-input`, `uniswap/swap-exact-output`,
   `uniswap/quote-exact-input`, `discord/send-message`, `code/run-code`,
   `web3/transfer-funds`. 134 distinct action types in the catalog.
-- Note: there is no native `uniswap/swap-exact-output` in the template catalog
-  (only `quote-exact-output`); our compiler emits `uniswap/swap-exact-input`
-  for both legs, which matches the documented action set.
+- No native Chainlink action for ARB, so that symbol keeps the
+  `web3/read-contract` + registry-ABI fallback.
 
 ### Template syntax
 
 `{{@nodeId:Label.field}}` for node outputs, `{{input.x}}` for workflow input.
-This matches what our compiler already emits.
+Native Chainlink reads expose `result.answer` (raw int), so the price ref is
+`{{@read-1:Read ETH/USD.result.answer}}`; the generic read exposes `result`.
+Both are the shape our compiler now emits.
